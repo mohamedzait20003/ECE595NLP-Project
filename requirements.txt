@@ -1,0 +1,15 @@
+# General
+tqdm>=4.60.0
+
+# Data Collection
+datasets>=2.0.0
+requests>=2.25.1
+semanticscholar>=0.8.0
+
+# Data Processing
+pandas>=1.2.0
+numpy>=1.19.0
+
+# Audio Synthesis
+pyttsx3>=2.90
+soundfile>=0.13.1
