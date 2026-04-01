@@ -1,0 +1,17 @@
+# Data files (large, downloaded via scripts)
+src/data/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+*.egg
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+.DS_Store
