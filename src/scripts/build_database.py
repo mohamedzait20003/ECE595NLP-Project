@@ -2,12 +2,18 @@ import os
 import json
 import sqlite3
 import argparse
+from pathlib import Path
 from difflib import SequenceMatcher
 
-def build_citation_db(papers_path: str = "src/data/raw/papers.json", db_path: str = "src/data/citation_db/citations.db"):
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+def build_citation_db(papers_path: str = None, db_path: str = None):
+    papers_path = papers_path or str(PROJECT_ROOT / "src" / "data" / "raw" / "papers.json")
+    db_path = db_path or str(PROJECT_ROOT / "src" / "data" / "citation_db" / "citations.db")
+
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
-    
-    with open(papers_path, "r") as f:
+
+    with open(papers_path, "r", encoding="utf-8") as f:
         papers = json.load(f)
     
     conn = sqlite3.connect(db_path)
@@ -59,8 +65,8 @@ def build_citation_db(papers_path: str = "src/data/raw/papers.json", db_path: st
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--papers_path", default="src/data/raw/papers.json")
-    parser.add_argument("--db_path", default="src/data/citation_db/citations.db")
+    parser.add_argument("--papers_path", default=None)
+    parser.add_argument("--db_path", default=None)
     args = parser.parse_args()
     build_citation_db(args.papers_path, args.db_path)
 

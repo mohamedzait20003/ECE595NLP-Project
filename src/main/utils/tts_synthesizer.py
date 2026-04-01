@@ -1,10 +1,9 @@
 import os
 import json
-import wave
 import pyttsx3
 import numpy as np
 from tqdm import tqdm
-from soundfile import sf
+import soundfile as sf
 from pathlib import Path
 
 # Project root

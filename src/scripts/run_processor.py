@@ -10,9 +10,9 @@ from src.main.utils import Processor
 
 def main():
     parser = argparse.ArgumentParser(description="Process raw Semantic Scholar data into training examples")
-    parser.add_argument("--raw_dir", type=str, default="src/data/raw",
+    parser.add_argument("--raw_dir", type=str, default=None,
                         help="Directory containing papers.json and citation_contexts.json")
-    parser.add_argument("--output_dir", type=str, default="src/data/processed",
+    parser.add_argument("--output_dir", type=str, default=None,
                         help="Directory to save train/val/test splits")
     parser.add_argument("--min_length", type=int, default=50,
                         help="Minimum citation context sentence length")
@@ -27,7 +27,7 @@ def main():
     print(f"Total examples: {len(df)}")
     print(f"Unique citations: {df['citation_string'].nunique()}")
     print(f"Unique source papers: {df['citing_paper_id'].nunique()}")
-    print(f"Output directory: {args.output_dir}")
+    print(f"Output directory: {args.output_dir or 'src/data/processed (default)'}")
 
 
 if __name__ == "__main__":

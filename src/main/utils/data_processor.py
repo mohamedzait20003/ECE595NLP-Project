@@ -6,6 +6,8 @@ from tqdm import tqdm
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+
 CITATION_PATTERN = re.compile(
     r'\(([A-Z][a-z]+(?:\s+(?:et\s+al\.?|and\s+[A-Z][a-z]+))?'
     r'(?:\s*,\s*\d{4}))\)'
@@ -19,16 +21,18 @@ CITATION_PATTERN_ALT = re.compile(
 )
 
 class Processor:
-    def __init__(self, raw_data_dir: str = "src/data/raw", processed_data_dir: str = "src/data/processed"):
+    def __init__(self, raw_data_dir: str = None, processed_data_dir: str = None):
+        raw_data_dir = raw_data_dir or str(PROJECT_ROOT / "src" / "data" / "raw")
+        processed_data_dir = processed_data_dir or str(PROJECT_ROOT / "src" / "data" / "processed")
         self.raw_data_dir = raw_data_dir
         self.processed_data_dir = processed_data_dir
         os.makedirs(self.processed_data_dir, exist_ok=True)
 
     def load_raw_data(self) -> Tuple[List[Dict], List[Dict]]:
-        with open(os.path.join(self.raw_data_dir, "papers.json"), "r") as f:
+        with open(os.path.join(self.raw_data_dir, "papers.json"), "r", encoding="utf-8") as f:
             papers = json.load(f)
 
-        with open(os.path.join(self.raw_data_dir, "citation_contexts.json"), "r") as f:
+        with open(os.path.join(self.raw_data_dir, "citation_contexts.json"), "r", encoding="utf-8") as f:
             contexts = json.load(f)
 
         return papers, contexts
