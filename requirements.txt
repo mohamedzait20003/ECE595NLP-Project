@@ -13,3 +13,10 @@ numpy>=1.19.0
 # Audio Synthesis
 pyttsx3>=2.90
 soundfile>=0.13.1
+
+# Model & Training (CUDA 12.4)
+--extra-index-url https://download.pytorch.org/whl/cu124
+torch>=2.1.0
+librosa>=0.10.0
+transformers>=4.36.0
+
