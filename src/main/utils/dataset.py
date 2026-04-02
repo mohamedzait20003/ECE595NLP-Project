@@ -46,7 +46,7 @@ class CustomDataset(Dataset):
         ).input_features.squeeze(0)
 
         context = f"{entry['source_title']} </s> {entry['source_abstract']}"
-        text_encoding = self.tokenizer(
+        text_encoding = self.bart_tokenizer(
             context,
             max_length=self.max_text_len,
             padding=False,
@@ -56,7 +56,7 @@ class CustomDataset(Dataset):
         text_input_ids = text_encoding["input_ids"].squeeze(0)
         text_attention_mask = text_encoding["attention_mask"].squeeze(0)
 
-        target_encoding = self.tokenizer(
+        target_encoding = self.bart_tokenizer(
             entry["citation_string"],
             max_length=self.max_target_len,
             padding=False,

@@ -25,7 +25,7 @@ class CrossModalFusion(nn.Module):
             num_layers=num_layers
         )
 
-    def forward(self, audio_hidden: torch.Tensor, text_hidden: torch.Tensor, audio_mask: torch.Tensor, text_mask: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, audio_hidden: torch.Tensor, text_hidden: torch.Tensor, audio_mask: torch.Tensor = None, text_mask: torch.Tensor = None) -> Tuple[torch.Tensor, torch.Tensor]:
         B = audio_hidden.size(0)
         device = audio_hidden.device
 
@@ -36,6 +36,8 @@ class CrossModalFusion(nn.Module):
 
         if audio_mask is None:
             audio_mask = torch.ones(B, audio_hidden.size(1), device=device)
+        if text_mask is None:
+            text_mask = torch.ones(B, text_hidden.size(1), device=device)
 
         combined_mask = torch.cat([audio_mask, text_mask], dim=1)
 
