@@ -23,7 +23,7 @@ training:
   warmup_steps: 500
   total_steps: 20000
   max_grad_norm: 1.0
-  fp16: false  # set to true after installing CUDA torch
+  fp16: true
   seed: 42
   eval_every: 500
   save_every: 1000
