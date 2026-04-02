@@ -1,4 +1,4 @@
 from .callbacks import TrainingCallback
-from .pretrain import pretrain
+from .pretrain import train
 
-__all__ = ["TrainingCallback"]
+__all__ = ["TrainingCallback", "train"]
