@@ -20,7 +20,10 @@ class CustomDataset(Dataset):
         sample_rate: int = 16000
     ):
         with open(manifest_path, "r", encoding="utf-8") as f:
-            self.manifest = json.load(f)
+            raw = json.load(f)
+        self.manifest = [e for e in raw if os.path.exists(e["audio_path"])]
+        if len(self.manifest) < len(raw):
+            print(f"[Dataset] Skipped {len(raw) - len(self.manifest)} entries with missing audio files.")
 
         self.whisper_processor = WhisperProcessor.from_pretrained(whisper_model)
         self.bart_tokenizer = BartTokenizer.from_pretrained(bart_model)
