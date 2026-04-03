@@ -8,7 +8,7 @@ class CitationHead(nn.Module):
         bart = BartForConditionalGeneration.from_pretrained(model_name)
 
         self.lm_head = bart.lm_head
-        self.final_logits_bias = bart.final_logits_bias
+        self.register_buffer('final_logits_bias', bart.final_logits_bias)
 
     def forward(self, decoder_hidden: torch.Tensor) -> torch.Tensor:
         logits = self.lm_head(decoder_hidden) + self.final_logits_bias
