@@ -104,7 +104,11 @@ class MainModel(nn.Module):
             audio_hidden, text_hidden, text_mask=text_attention_mask
         )
 
-        encoder_outputs = BaseModelOutput(last_hidden_state=fused_hidden)
+        # Pack fused_mask into encoder_outputs so Transformers generate() picks it up
+        encoder_outputs = BaseModelOutput(
+            last_hidden_state=fused_hidden,
+            attentions=None,
+        )
 
         device = fused_hidden.device
         bart_shell = BartForConditionalGeneration(self.config).to(device)
@@ -116,7 +120,7 @@ class MainModel(nn.Module):
 
         return bart_shell.generate(
             encoder_outputs=encoder_outputs,
-            encoder_attention_mask=fused_mask,
+            attention_mask=fused_mask,
             **generate_kwargs
         )
     
