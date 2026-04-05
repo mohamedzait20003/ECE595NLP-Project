@@ -135,7 +135,7 @@ def train(config_path: str):
         num_training_steps=config["training"]["total_steps"]
     )
 
-    scaler = torch.cuda.amp.GradScaler(enabled=config["training"]["fp16"])
+    scaler = torch.amp.GradScaler("cuda", enabled=config["training"]["fp16"])
 
     # Callbacks
     checkpoint_dir = str(PROJECT_ROOT / config["training"]["checkpoint_dir"])
@@ -164,23 +164,23 @@ def train(config_path: str):
 
             batch = {k: v.to(device) for k, v in batch.items()}
 
-            with torch.cuda.amp.autocast(enabled=config["training"]["fp16"]):
+            with torch.amp.autocast("cuda", enabled=config["training"]["fp16"]):
                 output = model(**batch)
                 loss = output.loss / accum_steps
 
             scaler.scale(loss).backward()
 
-            if (step + 1) % accum_steps == 0:
+            step += 1
+
+            if step % accum_steps == 0:
                 scaler.unscale_(optimizer)
                 torch.nn.utils.clip_grad_norm_(
                     model.parameters(), max_grad_norm
                 )
                 scaler.step(optimizer)
                 scaler.update()
-                scheduler.step()
                 optimizer.zero_grad()
-
-            step += 1
+                scheduler.step()
             train_loss = loss.item() * accum_steps
             pbar.update(1)
             pbar.set_postfix(loss=f"{train_loss:.4f}", lr=f"{scheduler.get_last_lr()[0]:.2e}")
