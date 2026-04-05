@@ -177,15 +177,19 @@ def train(config_path: str):
                 torch.nn.utils.clip_grad_norm_(
                     model.parameters(), max_grad_norm
                 )
+                scale_before = scaler.get_scale()
                 scaler.step(optimizer)
                 scaler.update()
                 optimizer.zero_grad()
-                scheduler.step()
+
+                if scaler.get_scale() >= scale_before:
+                    scheduler.step()
+                    
             train_loss = loss.item() * accum_steps
             pbar.update(1)
-            pbar.set_postfix(loss=f"{train_loss:.4f}", lr=f"{scheduler.get_last_lr()[0]:.2e}")
+            pbar.set_postfix(loss=f"{train_loss:.4f}", lr=f"{optimizer.param_groups[0]['lr']:.2e}")
 
-            callback.on_step(step, train_loss, scheduler.get_last_lr()[0])
+            callback.on_step(step, train_loss, optimizer.param_groups[0]['lr'])
 
             if step % config["training"]["eval_every"] == 0:
                 val_loss = evaluate(model, val_loader, device)
