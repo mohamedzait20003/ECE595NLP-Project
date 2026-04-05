@@ -106,10 +106,13 @@ class MainModel(nn.Module):
 
         encoder_outputs = BaseModelOutput(last_hidden_state=fused_hidden)
 
-        bart_shell = BartForConditionalGeneration(self.config)
+        device = fused_hidden.device
+        bart_shell = BartForConditionalGeneration(self.config).to(device)
         bart_shell.model.decoder = self.decoder
         bart_shell.lm_head = self.citation_head.lm_head
-        bart_shell.final_logits_bias = self.citation_head.final_logits_bias
+        bart_shell.register_buffer(
+            'final_logits_bias', self.citation_head.final_logits_bias
+        )
 
         return bart_shell.generate(
             encoder_outputs=encoder_outputs,

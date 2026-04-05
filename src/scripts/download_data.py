@@ -167,6 +167,8 @@ if __name__ == "__main__":
     parser.add_argument("--api_key", type=str, default=None, help="Semantic Scholar API key (optional, increases rate limit)")
     parser.add_argument("--query", type=str, default="natural language processing")
     parser.add_argument("--max_papers", type=int, default=5000, help="Maximum number of papers to download")
+    parser.add_argument("--max_citations_per_paper", type=int, default=100, help="Max citation contexts per paper")
+    parser.add_argument("--top_k_for_citations", type=int, default=2000, help="Fetch citations for the top-K most cited papers")
     parser.add_argument("--output_dir", type=str, default=None)
     args = parser.parse_args()
 
@@ -176,8 +178,9 @@ if __name__ == "__main__":
     )
 
     top_papers = sorted(papers, key=lambda p: p["citationCount"] or 0, reverse=True)
-    top_ids = [p["paperId"] for p in top_papers[:500]]
-    
+    top_ids = [p["paperId"] for p in top_papers[:args.top_k_for_citations]]
+
     download_citation_contexts(
-        paper_ids=top_ids, api_key=args.api_key, output_dir=args.output_dir
+        paper_ids=top_ids, api_key=args.api_key, output_dir=args.output_dir,
+        max_citations_per_paper=args.max_citations_per_paper
     )
