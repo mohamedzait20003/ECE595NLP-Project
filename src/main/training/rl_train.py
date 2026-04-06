@@ -173,7 +173,6 @@ def rl_train(config_path: str):
             with torch.amp.autocast("cuda", enabled=cfg["training"]["fp16"]):
                 output = model(**batch)
                 logprobs_new = sequence_logprob(output.logits, batch["labels"])
-                values = value_head(output.encoder_hidden_states.detach().float())
 
                 with torch.no_grad():
                     ref_output = ref_model(**batch)
@@ -181,6 +180,9 @@ def rl_train(config_path: str):
 
                 kl_div = logprobs_new - logprobs_ref
                 rewards_penalized = rewards - kl_coef * kl_div.detach()
+
+            # Value head outside autocast to avoid fp16 mismatch
+            values = value_head(output.encoder_hidden_states.detach().float())
 
             logprobs_old = logprobs_new.detach()
 
