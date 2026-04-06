@@ -17,10 +17,11 @@ data:
 
 rl:
   stage1_checkpoint: "src/checkpoints/pretrain/checkpoint_best.pt"
-  n_rollouts: 4
+  ppo_epochs: 4
   clip_eps: 0.2
   vf_coef: 0.5
-  kl_coef: 0.1
+  kl_coef: 0.3
+  early_stop_patience: 10
   reward_weights:
     retrieval: 0.4
     nli: 0.4
@@ -28,10 +29,10 @@ rl:
 
 training:
   batch_size: 4
-  learning_rate: 1.0e-5
+  learning_rate: 3.0e-6
   weight_decay: 0.01
   warmup_steps: 100
-  total_steps: 5000
+  total_steps: 3000
   max_grad_norm: 1.0
   fp16: true
   seed: 42

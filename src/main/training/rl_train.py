@@ -23,6 +23,33 @@ class ValueHead(torch.nn.Module):
         return self.linear(hidden[:, 0, :]).squeeze(-1)  # [B]
 
 
+class RunningRewardNormalizer:
+    """Tracks running mean/std of rewards for stable advantage estimation."""
+    def __init__(self):
+        self.mean = 0.0
+        self.var = 1.0
+        self.count = 0
+
+    def update(self, rewards: torch.Tensor):
+        batch_mean = rewards.mean().item()
+        batch_var = rewards.var().item() if rewards.numel() > 1 else 0.0
+        batch_count = rewards.numel()
+
+        total = self.count + batch_count
+        delta = batch_mean - self.mean
+        self.mean += delta * batch_count / max(total, 1)
+        self.var = (
+            (self.count * self.var + batch_count * batch_var
+             + delta ** 2 * self.count * batch_count / max(total, 1))
+            / max(total, 1)
+        )
+        self.count = total
+
+    def normalize(self, rewards: torch.Tensor) -> torch.Tensor:
+        std = max(self.var ** 0.5, 1e-8)
+        return (rewards - self.mean) / std
+
+
 def sequence_logprob(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
     """Per-sequence mean log-prob over non-padding tokens."""
     log_probs = F.log_softmax(logits, dim=-1)
@@ -60,6 +87,9 @@ def rl_train(config_path: str):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
 
+    ppo_epochs = cfg["rl"].get("ppo_epochs", 4)
+    early_stop_patience = cfg["rl"].get("early_stop_patience", 10)
+
     # ── Active model (policy) ──
     model = MainModel(
         whispher_model=cfg["model"]["whisper_model"],
@@ -82,7 +112,7 @@ def rl_train(config_path: str):
         p.requires_grad = False
     print("Created frozen reference model for KL divergence.")
 
-    kl_coef = cfg["rl"].get("kl_coef", 0.1)
+    kl_coef = cfg["rl"].get("kl_coef", 0.3)
 
     value_head = ValueHead(hidden_size=cfg["model"]["fused_dim"]).to(device)
 
@@ -94,6 +124,8 @@ def rl_train(config_path: str):
         hallucination_weight=cfg["rl"]["reward_weights"]["hallucination"],
         device=str(device),
     )
+
+    reward_normalizer = RunningRewardNormalizer()
 
     # ── Data ──
     train_dataset = CustomDataset(
@@ -130,6 +162,7 @@ def rl_train(config_path: str):
     ckpt_dir.mkdir(parents=True, exist_ok=True)
 
     best_reward = -float("inf")
+    no_improve_count = 0
     history = []
     step = 0
 
@@ -142,7 +175,7 @@ def rl_train(config_path: str):
 
             batch = {k: v.to(device) for k, v in batch.items()}
 
-            # ── Generate citations (rollout) ──────────────────────────────
+            # ── Phase 1: Collect rollout (no gradients) ──────────────────
             model.eval()
             with torch.no_grad():
                 generated_ids = model.generate(
@@ -162,45 +195,52 @@ def rl_train(config_path: str):
                 batch["text_input_ids"], skip_special_tokens=True
             )
 
-            # Compute reward from generated vs reference strings
             rewards = reward_fn(generated_strs, reference_strs, context_strs).to(device)
 
-            # ── Forward pass with teacher-forced labels ───────────────────
-            # Use original labels for stable gradient computation;
-            # rewards from generation guide the policy update
-            model.train()
-            optimizer.zero_grad()
+            # Normalize rewards with running statistics
+            reward_normalizer.update(rewards)
+            rewards_norm = reward_normalizer.normalize(rewards)
 
-            with torch.amp.autocast("cuda", enabled=cfg["training"]["fp16"]):
-                output = model(**batch)
-                logprobs_new = sequence_logprob(output.logits, batch["labels"])
+            # Compute old logprobs and ref logprobs (frozen, computed once per rollout)
+            with torch.no_grad():
+                with torch.amp.autocast("cuda", enabled=cfg["training"]["fp16"]):
+                    old_output = model(**batch)
+                    logprobs_old = sequence_logprob(old_output.logits, batch["labels"])
 
-                with torch.no_grad():
                     ref_output = ref_model(**batch)
                     logprobs_ref = sequence_logprob(ref_output.logits, batch["labels"])
 
-                kl_div = logprobs_new - logprobs_ref
-                rewards_penalized = rewards - kl_coef * kl_div.detach()
+                    kl_div = logprobs_old - logprobs_ref
 
-            # Value head outside autocast to avoid fp16 mismatch
-            values = value_head(output.encoder_hidden_states.detach().float())
+            rewards_penalized = rewards_norm - kl_coef * kl_div.abs()
 
-            logprobs_old = logprobs_new.detach()
+            # ── Phase 2: Multiple PPO epochs on this rollout ─────────────
+            model.train()
+            for _ in range(ppo_epochs):
+                optimizer.zero_grad()
 
-            loss, pg, vf = ppo_loss(
-                logprobs_new, logprobs_old, values, rewards_penalized,
-                clip_eps=cfg["rl"]["clip_eps"],
-                vf_coef=cfg["rl"]["vf_coef"],
-            )
+                with torch.amp.autocast("cuda", enabled=cfg["training"]["fp16"]):
+                    output = model(**batch)
+                    logprobs_new = sequence_logprob(output.logits, batch["labels"])
 
-            scaler.scale(loss).backward()
-            scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(
-                [p for p in params if p.requires_grad],
-                cfg["training"]["max_grad_norm"],
-            )
-            scaler.step(optimizer)
-            scaler.update()
+                # Value head outside autocast to avoid fp16 mismatch
+                values = value_head(output.encoder_hidden_states.detach().float())
+
+                loss, pg, vf = ppo_loss(
+                    logprobs_new, logprobs_old, values, rewards_penalized,
+                    clip_eps=cfg["rl"]["clip_eps"],
+                    vf_coef=cfg["rl"]["vf_coef"],
+                )
+
+                scaler.scale(loss).backward()
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(
+                    [p for p in params if p.requires_grad],
+                    cfg["training"]["max_grad_norm"],
+                )
+                scaler.step(optimizer)
+                scaler.update()
+
             scheduler.step()
 
             step += 1
@@ -231,18 +271,28 @@ def rl_train(config_path: str):
             if step % cfg["training"]["save_every"] == 0:
                 if mean_reward > best_reward:
                     best_reward = mean_reward
+                    no_improve_count = 0
                     torch.save({
                         "step": step,
                         "model_state_dict": model.state_dict(),
                         "value_head_state_dict": value_head.state_dict(),
                         "best_reward": best_reward,
                     }, ckpt_dir / "checkpoint_best_rl.pt")
+                else:
+                    no_improve_count += 1
 
                 torch.save({
                     "step": step,
                     "model_state_dict": model.state_dict(),
                     "value_head_state_dict": value_head.state_dict(),
                 }, ckpt_dir / f"checkpoint_step{step}.pt")
+
+                # Early stopping
+                if no_improve_count >= early_stop_patience:
+                    print(f"  Early stopping at step {step} (no improvement for "
+                          f"{early_stop_patience} save intervals)")
+                    step = cfg["training"]["total_steps"]  # break outer loop
+                    break
 
     pbar.close()
 
