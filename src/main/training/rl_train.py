@@ -182,23 +182,36 @@ def rl_train(config_path: str):
             rewards_flat = reward_fn(generated_strs, reference_strs, context_strs).to(device)
 
             # ── Normalize rewards within each group of K rollouts ──────────
-            # rewards: [B, K] — subtract per-example mean (baseline)
             rewards_grouped = rewards_flat.view(B, n_rollouts)
-            baseline = rewards_grouped.mean(dim=1, keepdim=True)   # [B, 1]
-            rewards_normed = (rewards_grouped - baseline).view(-1)  # [B*K]
+            baseline = rewards_grouped.mean(dim=1, keepdim=True)
+            rewards_normed = (rewards_grouped - baseline).view(-1)
+
+            # ── Prepare generated labels for forward pass ─────────────────
+            gen_labels = generated_ids.clone()
+            # Mask pad tokens with -100 for loss computation
+            pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else tokenizer.eos_token_id
+            gen_labels[gen_labels == pad_id] = -100
+
+            # Build forward batch using original audio/text but generated labels
+            rl_batch = {
+                "audio_features": expanded["audio_features"],
+                "text_input_ids": expanded["text_input_ids"],
+                "text_attention_mask": expanded["text_attention_mask"],
+                "labels": gen_labels,
+            }
 
             # ── Forward pass on expanded batch ────────────────────────────
             model.train()
             optimizer.zero_grad()
 
             with torch.amp.autocast("cuda", enabled=cfg["training"]["fp16"]):
-                output = model(**expanded)
-                logprobs_new = sequence_logprob(output.logits, expanded["labels"])
+                output = model(**rl_batch)
+                logprobs_new = sequence_logprob(output.logits, gen_labels)
                 values = value_head(output.encoder_hidden_states.detach())
 
                 with torch.no_grad():
-                    ref_output = ref_model(**expanded)
-                    logprobs_ref = sequence_logprob(ref_output.logits, expanded["labels"])
+                    ref_output = ref_model(**rl_batch)
+                    logprobs_ref = sequence_logprob(ref_output.logits, gen_labels)
 
                 kl_div = logprobs_new - logprobs_ref
                 rewards_penalized = rewards_normed - kl_coef * kl_div.detach()
