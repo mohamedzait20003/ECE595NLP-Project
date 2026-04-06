@@ -26,8 +26,9 @@ class ValueHead(torch.nn.Module):
 def sequence_logprob(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
     """Per-sequence mean log-prob over non-padding tokens."""
     log_probs = F.log_softmax(logits, dim=-1)
-    token_lp = log_probs.gather(2, labels.unsqueeze(-1)).squeeze(-1)
     mask = (labels != -100).float()
+    safe_labels = labels.clamp(min=0)  # -100 is invalid gather index; clamp then mask
+    token_lp = log_probs.gather(2, safe_labels.unsqueeze(-1)).squeeze(-1)
     return (token_lp * mask).sum(-1) / mask.sum(-1).clamp(min=1)
 
 
