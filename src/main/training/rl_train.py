@@ -122,6 +122,7 @@ def rl_train(config_path: str):
         retrieval_weight=cfg["rl"]["reward_weights"]["retrieval"],
         nli_weight=cfg["rl"]["reward_weights"]["nli"],
         hallucination_weight=cfg["rl"]["reward_weights"]["hallucination"],
+        exact_match_weight=cfg["rl"]["reward_weights"].get("exact_match", 0.5),
         device=str(device),
     )
 

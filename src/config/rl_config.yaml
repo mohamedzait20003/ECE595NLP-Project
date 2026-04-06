@@ -20,24 +20,26 @@ rl:
   ppo_epochs: 2
   clip_eps: 0.2
   vf_coef: 0.5
-  kl_coef: 1.0
+  kl_coef: 3.0
+  kl_target: 0.03
   early_stop_patience: 10
   reward_weights:
-    retrieval: 0.4
-    nli: 0.4
+    retrieval: 0.3
+    nli: 0.3
     hallucination: 0.2
+    exact_match: 0.5
 
 training:
   batch_size: 4
-  learning_rate: 1.0e-6
+  learning_rate: 5.0e-7
   weight_decay: 0.01
-  warmup_steps: 100
-  total_steps: 3000
+  warmup_steps: 50
+  total_steps: 500
   max_grad_norm: 1.0
   fp16: true
   seed: 42
-  log_every: 50
-  save_every: 500
+  log_every: 25
+  save_every: 50
   checkpoint_dir: "src/checkpoints/rl"
 
 wandb:
