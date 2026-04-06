@@ -173,7 +173,7 @@ def rl_train(config_path: str):
             with torch.amp.autocast("cuda", enabled=cfg["training"]["fp16"]):
                 output = model(**batch)
                 logprobs_new = sequence_logprob(output.logits, batch["labels"])
-                values = value_head(output.encoder_hidden_states.detach())
+                values = value_head(output.encoder_hidden_states.detach().float())
 
                 with torch.no_grad():
                     ref_output = ref_model(**batch)
