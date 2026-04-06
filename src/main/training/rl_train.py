@@ -52,24 +52,12 @@ def ppo_loss(
     return pg_loss + vf_coef * vf_loss, pg_loss.item(), vf_loss.item()
 
 
-def expand_batch(batch: dict, k: int) -> dict:
-    """Repeat each example K times so we can generate K rollouts per input."""
-    return {
-        key: val.repeat_interleave(k, dim=0)
-        for key, val in batch.items()
-    }
-
-
 def rl_train(config_path: str):
     with open(config_path, "r") as f:
         cfg = yaml.safe_load(f)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
-
-    # Number of rollouts per input example (reduces PPO variance)
-    n_rollouts = cfg["rl"].get("n_rollouts", 4)
-    print(f"Rollouts per sample: {n_rollouts}")
 
     # ── Active model (policy) ──
     model = MainModel(
@@ -152,69 +140,47 @@ def rl_train(config_path: str):
                 break
 
             batch = {k: v.to(device) for k, v in batch.items()}
-            B = batch["audio_features"].shape[0]
 
-            # ── Collect K rollouts per input ──────────────────────────────
-            # Expand batch: [B, ...] → [B*K, ...]
-            expanded = expand_batch(batch, n_rollouts)
-
+            # ── Generate citations (rollout) ──────────────────────────────
             model.eval()
             with torch.no_grad():
                 generated_ids = model.generate(
-                    audio_features=expanded["audio_features"],
-                    text_input_ids=expanded["text_input_ids"],
-                    text_attention_mask=expanded["text_attention_mask"],
+                    audio_features=batch["audio_features"],
+                    text_input_ids=batch["text_input_ids"],
+                    text_attention_mask=batch["text_attention_mask"],
                     max_length=cfg["data"]["max_target_len"],
-                    num_beams=1,          # sampling, not beam search
-                    do_sample=True,       # stochastic rollouts for diversity
+                    do_sample=True,
                     temperature=0.9,
                 )
 
             generated_strs = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)
             reference_strs = tokenizer.batch_decode(
-                expanded["labels"].clamp(min=0), skip_special_tokens=True
+                batch["labels"].clamp(min=0), skip_special_tokens=True
             )
             context_strs = tokenizer.batch_decode(
-                expanded["text_input_ids"], skip_special_tokens=True
+                batch["text_input_ids"], skip_special_tokens=True
             )
 
-            # rewards: [B*K]
-            rewards_flat = reward_fn(generated_strs, reference_strs, context_strs).to(device)
+            # Compute reward from generated vs reference strings
+            rewards = reward_fn(generated_strs, reference_strs, context_strs).to(device)
 
-            # ── Normalize rewards within each group of K rollouts ──────────
-            rewards_grouped = rewards_flat.view(B, n_rollouts)
-            baseline = rewards_grouped.mean(dim=1, keepdim=True)
-            rewards_normed = (rewards_grouped - baseline).view(-1)
-
-            # ── Prepare generated labels for forward pass ─────────────────
-            gen_labels = generated_ids.clone()
-            # Mask pad tokens with -100 for loss computation
-            pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else tokenizer.eos_token_id
-            gen_labels[gen_labels == pad_id] = -100
-
-            # Build forward batch using original audio/text but generated labels
-            rl_batch = {
-                "audio_features": expanded["audio_features"],
-                "text_input_ids": expanded["text_input_ids"],
-                "text_attention_mask": expanded["text_attention_mask"],
-                "labels": gen_labels,
-            }
-
-            # ── Forward pass on expanded batch ────────────────────────────
+            # ── Forward pass with teacher-forced labels ───────────────────
+            # Use original labels for stable gradient computation;
+            # rewards from generation guide the policy update
             model.train()
             optimizer.zero_grad()
 
             with torch.amp.autocast("cuda", enabled=cfg["training"]["fp16"]):
-                output = model(**rl_batch)
-                logprobs_new = sequence_logprob(output.logits, gen_labels)
+                output = model(**batch)
+                logprobs_new = sequence_logprob(output.logits, batch["labels"])
                 values = value_head(output.encoder_hidden_states.detach())
 
                 with torch.no_grad():
-                    ref_output = ref_model(**rl_batch)
-                    logprobs_ref = sequence_logprob(ref_output.logits, gen_labels)
+                    ref_output = ref_model(**batch)
+                    logprobs_ref = sequence_logprob(ref_output.logits, batch["labels"])
 
                 kl_div = logprobs_new - logprobs_ref
-                rewards_penalized = rewards_normed - kl_coef * kl_div.detach()
+                rewards_penalized = rewards - kl_coef * kl_div.detach()
 
             logprobs_old = logprobs_new.detach()
 
@@ -235,7 +201,7 @@ def rl_train(config_path: str):
             scheduler.step()
 
             step += 1
-            mean_reward = rewards_flat.mean().item()
+            mean_reward = rewards.mean().item()
             mean_kl = kl_div.mean().item()
             pbar.set_postfix(
                 reward=f"{mean_reward:.4f}",
