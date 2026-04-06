@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 from typing import Optional
 from dataclasses import dataclass
-from transformers.modeling_outputs import BaseModelOutput
 from transformers import BartTokenizer, BartForConditionalGeneration
 
 # Importing the components
@@ -91,33 +90,58 @@ class MainModel(nn.Module):
             encoder_hidden_states=fused_hidden
         )
     
+    @torch.no_grad()
     def generate(self,
         audio_features: torch.Tensor,
         text_input_ids: torch.Tensor,
         text_attention_mask: torch.Tensor,
-        **generate_kwargs
+        max_length: int = 64,
+        temperature: float = 1.0,
+        do_sample: bool = False,
+        num_beams: int = 1,
+        **kwargs
     ) -> torch.Tensor:
+        """Autoregressive decoding without allocating a separate BartForConditionalGeneration."""
         audio_hidden = self.audio_encoder(audio_features)
         text_hidden = self.text_encoder(text_input_ids, text_attention_mask)
 
-        fused_hidden, _ = self.fusion(
+        fused_hidden, fused_mask = self.fusion(
             audio_hidden, text_hidden, text_mask=text_attention_mask
         )
 
-        encoder_outputs = BaseModelOutput(last_hidden_state=fused_hidden)
-
-        device = fused_hidden.device
-        bart_shell = BartForConditionalGeneration(self.config).to(device)
-        bart_shell.model.decoder = self.decoder
-        bart_shell.lm_head = self.citation_head.lm_head
-        bart_shell.register_buffer(
-            'final_logits_bias', self.citation_head.final_logits_bias
+        B = audio_features.shape[0]
+        device = audio_features.device
+        decoder_ids = torch.full(
+            (B, 1), self.config.decoder_start_token_id,
+            dtype=torch.long, device=device
         )
+        eos_id = self.config.eos_token_id
+        pad_id = self.config.pad_token_id
+        finished = torch.zeros(B, dtype=torch.bool, device=device)
 
-        return bart_shell.generate(
-            encoder_outputs=encoder_outputs,
-            **generate_kwargs
-        )
+        for _ in range(max_length):
+            decoder_out = self.decoder(
+                input_ids=decoder_ids,
+                encoder_hidden_states=fused_hidden,
+                encoder_attention_mask=fused_mask,
+            )
+            next_logits = self.citation_head(decoder_out.last_hidden_state[:, -1:, :]).squeeze(1)
+
+            if do_sample and temperature > 0:
+                probs = torch.softmax(next_logits / temperature, dim=-1)
+                next_token = torch.multinomial(probs, num_samples=1)
+            else:
+                next_token = next_logits.argmax(dim=-1, keepdim=True)
+
+            # Replace tokens for already-finished sequences with pad
+            next_token = next_token.masked_fill(finished.unsqueeze(1), pad_id)
+            decoder_ids = torch.cat([decoder_ids, next_token], dim=1)
+
+            finished = finished | (next_token.squeeze(1) == eos_id)
+            if finished.all():
+                break
+
+        return decoder_ids
     
     def save(self, path: str):
         torch.save(self.state_dict(), path)
