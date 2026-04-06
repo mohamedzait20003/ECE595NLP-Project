@@ -216,12 +216,19 @@ def rl_train(config_path: str):
 
             # ── Phase 2: Multiple PPO epochs on this rollout ─────────────
             model.train()
+            kl_target = cfg["rl"].get("kl_target", 0.05)
             for _ in range(ppo_epochs):
                 optimizer.zero_grad()
 
                 with torch.amp.autocast("cuda", enabled=cfg["training"]["fp16"]):
                     output = model(**batch)
                     logprobs_new = sequence_logprob(output.logits, batch["labels"])
+
+                # KL early exit: stop inner loop if policy drifted too far
+                with torch.no_grad():
+                    approx_kl = (logprobs_old - logprobs_new).mean().item()
+                    if abs(approx_kl) > kl_target:
+                        break
 
                 # Value head outside autocast to avoid fp16 mismatch
                 values = value_head(output.encoder_hidden_states.detach().float())
