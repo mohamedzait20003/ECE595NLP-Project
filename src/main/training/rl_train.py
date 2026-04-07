@@ -218,6 +218,7 @@ def rl_train(config_path: str):
             # ── Phase 2: Multiple PPO epochs on this rollout ─────────────
             model.train()
             kl_target = cfg["rl"].get("kl_target", 0.05)
+            pg, vf = 0.0, 0.0
             for _ in range(ppo_epochs):
                 optimizer.zero_grad()
 
