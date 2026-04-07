@@ -38,6 +38,8 @@ def generate_predictions(
     processor: WhisperProcessor,
     device: torch.device,
     max_length: int = 64,
+    do_sample: bool = False,
+    temperature: float = 0.7,
 ) -> tuple[list[str], list[str]]:
     """Run generation on test entries, return (generated, references)."""
     generated = []
@@ -65,6 +67,8 @@ def generate_predictions(
                 text_input_ids=text_ids,
                 text_attention_mask=text_mask,
                 max_length=max_length,
+                do_sample=do_sample,
+                temperature=temperature,
             )
 
         pred = tokenizer.decode(out[0], skip_special_tokens=True)
@@ -79,6 +83,8 @@ def evaluate_checkpoint(
     test_manifest_path: str,
     device: torch.device,
     max_samples: int = 0,
+    do_sample: bool = False,
+    temperature: float = 0.7,
 ) -> dict:
     """Evaluate a single checkpoint on the test set.
 
@@ -87,6 +93,8 @@ def evaluate_checkpoint(
         test_manifest_path: Path to test_manifest.json.
         device: torch device.
         max_samples: Limit test samples (0 = use all).
+        do_sample: Use sampling instead of greedy decoding.
+        temperature: Sampling temperature (only used if do_sample=True).
 
     Returns:
         Dict with 'averages', 'per_sample', 'predictions'.
@@ -105,7 +113,8 @@ def evaluate_checkpoint(
     print(f"  Evaluating on {len(test_entries)} test samples...")
 
     generated, references = generate_predictions(
-        model, test_entries, tokenizer, processor, device
+        model, test_entries, tokenizer, processor, device,
+        do_sample=do_sample, temperature=temperature,
     )
 
     metrics = CitationMetrics()
@@ -124,6 +133,8 @@ def compare_checkpoints(
     test_manifest_path: str,
     device: torch.device,
     max_samples: int = 0,
+    do_sample: bool = False,
+    temperature: float = 0.7,
     output_path: str = None,
 ) -> dict[str, dict]:
     """Evaluate and compare multiple checkpoints.
@@ -133,6 +144,8 @@ def compare_checkpoints(
         test_manifest_path: Path to test_manifest.json.
         device: torch device.
         max_samples: Limit test samples (0 = use all).
+        do_sample: Use sampling instead of greedy decoding.
+        temperature: Sampling temperature (only used if do_sample=True).
         output_path: Optional path to save JSON results.
 
     Returns:
@@ -145,7 +158,8 @@ def compare_checkpoints(
         print(f"Evaluating: {name}")
         print(f"{'='*60}")
         results = evaluate_checkpoint(
-            ckpt_path, test_manifest_path, device, max_samples
+            ckpt_path, test_manifest_path, device, max_samples,
+            do_sample=do_sample, temperature=temperature,
         )
         all_results[name] = results
 

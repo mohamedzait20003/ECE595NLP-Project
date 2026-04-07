@@ -13,20 +13,20 @@ data:
   max_audio_len: 480000
   max_text_len: 512
   max_target_len: 64
-  num_workers: 2
+  num_workers: 4
 
 training:
-  batch_size: 4
-  gradient_accumulation_steps: 8
+  batch_size: 32
+  gradient_accumulation_steps: 2
   learning_rate: 5.0e-5
   weight_decay: 0.01
-  warmup_steps: 500
-  total_steps: 15000
+  warmup_steps: 300
+  total_steps: 5000
   max_grad_norm: 1.0
   fp16: true
   seed: 42
-  eval_every: 500
-  save_every: 1000
+  eval_every: 300
+  save_every: 500
   checkpoint_dir: "src/checkpoints/pretrain"
   log_every: 50
 

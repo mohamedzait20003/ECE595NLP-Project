@@ -13,7 +13,7 @@ data:
   max_audio_len: 480000
   max_text_len: 512
   max_target_len: 64
-  num_workers: 2
+  num_workers: 4
 
 rl:
   stage1_checkpoint: "src/checkpoints/pretrain/checkpoint_best.pt"
@@ -30,16 +30,16 @@ rl:
     exact_match: 0.5
 
 training:
-  batch_size: 4
+  batch_size: 8
   learning_rate: 5.0e-7
   weight_decay: 0.01
-  warmup_steps: 50
-  total_steps: 500
+  warmup_steps: 100
+  total_steps: 1500
   max_grad_norm: 1.0
   fp16: true
   seed: 42
   log_every: 25
-  save_every: 50
+  save_every: 150
   checkpoint_dir: "src/checkpoints/rl"
 
 wandb:

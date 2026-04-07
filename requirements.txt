@@ -5,6 +5,7 @@ tqdm>=4.60.0
 datasets>=2.0.0
 requests>=2.25.1
 semanticscholar>=0.8.0
+python-dotenv>=1.0.0
 
 # Data Processing
 pandas>=1.2.0

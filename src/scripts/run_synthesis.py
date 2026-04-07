@@ -17,6 +17,8 @@ def main():
                         help="Directory to save .wav files and manifests")
     parser.add_argument("--rate", type=int, default=150,
                         help="Speaking speed in words per minute")
+    parser.add_argument("--num_workers", type=int, default=0,
+                        help="Parallel workers (0=auto 75%% CPUs, 1=sequential)")
     parser.add_argument("--splits", nargs="+", default=["train", "val", "test"],
                         help="Which splits to synthesize")
     args = parser.parse_args()
@@ -24,7 +26,11 @@ def main():
     data_dir = Path(args.data_dir) if args.data_dir else PROJECT_ROOT / "src" / "data" / "processed"
     output_dir = args.output_dir or str(PROJECT_ROOT / "src" / "data" / "audio")
 
-    synthesizer = Synthesizer(rate=args.rate, output_dir=output_dir)
+    synthesizer = Synthesizer(
+        rate=args.rate,
+        output_dir=output_dir,
+        num_workers=args.num_workers,
+    )
 
     for split in args.splits:
         split_path = data_dir / f"{split}.json"
