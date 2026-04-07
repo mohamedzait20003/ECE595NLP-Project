@@ -17,7 +17,7 @@ data:
 
 rl:
   stage1_checkpoint: "src/checkpoints/pretrain/checkpoint_best.pt"
-  ppo_epochs: 2
+  ppo_epochs: 1
   clip_eps: 0.2
   vf_coef: 0.5
   kl_coef: 3.0
