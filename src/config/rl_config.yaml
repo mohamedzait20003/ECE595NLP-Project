@@ -21,7 +21,7 @@ rl:
   clip_eps: 0.2
   vf_coef: 0.5
   kl_coef: 3.0
-  kl_target: 0.03
+  kl_target: 0.2
   early_stop_patience: 10
   reward_weights:
     retrieval: 0.3
