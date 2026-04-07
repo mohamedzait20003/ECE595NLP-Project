@@ -129,13 +129,78 @@ def format_accuracy(generated: str) -> float:
     return 1.0 if any(re.match(p, text) for p in patterns) else 0.0
 
 
+_VALID_YEAR_RANGE = (1990, 2026)
+
+
+def hallucination_rate(generated: list[str]) -> float:
+    """
+    Fraction of outputs that are hallucinated.
+    A citation is hallucinated if it has invalid format OR year outside [1990, 2026].
+    """
+    count = 0
+    for g in generated:
+        if format_accuracy(g) == 0.0:
+            count += 1
+            continue
+        year_str = _extract_year(g)
+        if not year_str:
+            count += 1
+            continue
+        year = int(year_str)
+        if not (_VALID_YEAR_RANGE[0] <= year <= _VALID_YEAR_RANGE[1]):
+            count += 1
+    return count / max(len(generated), 1)
+
+
+def _normalize_citation(s: str) -> str:
+    """Lowercase + strip punctuation for loose matching."""
+    s = s.lower().strip()
+    s = re.sub(r'[^\w\s]', '', s)
+    return re.sub(r'\s+', ' ', s)
+
+
+def mrr_at_k(
+    candidates_list: list[list[str]], references: list[str], k: int = 5
+) -> float:
+    """
+    Mean Reciprocal Rank @ K.
+    candidates_list[i] is a ranked list of candidates for sample i.
+    """
+    rr_sum = 0.0
+    for candidates, ref in zip(candidates_list, references):
+        ref_norm = _normalize_citation(ref)
+        for rank, cand in enumerate(candidates[:k], start=1):
+            if _normalize_citation(cand) == ref_norm:
+                rr_sum += 1.0 / rank
+                break
+    return rr_sum / max(len(references), 1)
+
+
+def recall_at_k(
+    candidates_list: list[list[str]], references: list[str], k: int = 5
+) -> float:
+    """
+    Recall @ K.
+    Fraction of samples where at least one of the top-K candidates matches the reference.
+    """
+    hits = 0
+    for candidates, ref in zip(candidates_list, references):
+        ref_norm = _normalize_citation(ref)
+        if any(_normalize_citation(c) == ref_norm for c in candidates[:k]):
+            hits += 1
+    return hits / max(len(references), 1)
+
+
 class CitationMetrics:
     """Compute all metrics for a list of generated vs reference citations."""
 
     METRIC_NAMES = [
         "bleu", "rouge_l", "exact_match",
         "author_accuracy", "year_accuracy", "format_accuracy",
+        "hallucination_rate",
     ]
+
+    BEAM_METRIC_NAMES = ["mrr_at_5", "recall_at_5"]
 
     def __call__(
         self, generated: list[str], references: list[str]
@@ -143,7 +208,7 @@ class CitationMetrics:
         n = len(generated)
         assert n == len(references), "Length mismatch"
 
-        totals = {m: 0.0 for m in self.METRIC_NAMES}
+        totals = {m: 0.0 for m in self.METRIC_NAMES if m != "hallucination_rate"}
         per_sample = []
 
         for gen, ref in zip(generated, references):
@@ -160,4 +225,17 @@ class CitationMetrics:
                 totals[k] += v
 
         averages = {k: v / n for k, v in totals.items()}
+        averages["hallucination_rate"] = hallucination_rate(generated)
         return {"averages": averages, "per_sample": per_sample}
+
+    def compute_beam_metrics(
+        self,
+        candidates_list: list[list[str]],
+        references: list[str],
+        k: int = 5,
+    ) -> dict[str, float]:
+        """Compute MRR@K and Recall@K from multi-candidate output."""
+        return {
+            f"mrr_at_{k}": mrr_at_k(candidates_list, references, k),
+            f"recall_at_{k}": recall_at_k(candidates_list, references, k),
+        }

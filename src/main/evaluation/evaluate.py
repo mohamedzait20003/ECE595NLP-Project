@@ -31,6 +31,71 @@ def load_model(checkpoint_path: str, device: torch.device) -> MainModel:
     return model
 
 
+def generate_candidates(
+    model: MainModel,
+    test_entries: list[dict],
+    tokenizer: BartTokenizer,
+    processor: WhisperProcessor,
+    device: torch.device,
+    max_length: int = 64,
+    num_candidates: int = 5,
+    temperature: float = 0.8,
+) -> tuple[list[list[str]], list[str]]:
+    """Generate K candidates per sample using temperature sampling.
+
+    Returns:
+        candidates_list: List of K-candidate lists per sample.
+        references: Ground-truth citation strings.
+    """
+    all_candidates = []
+    references = []
+
+    for entry in tqdm(test_entries, desc=f"Generating {num_candidates} candidates"):
+        try:
+            waveform, _ = librosa.load(entry["audio_path"], sr=16000)
+        except Exception as e:
+            print(f"  Skipping {entry['audio_path']}: {e}")
+            continue
+
+        audio_features = processor(
+            waveform, sampling_rate=16000, return_tensors="pt"
+        ).input_features.to(device)
+
+        ctx = f"{entry['source_title']} </s> {entry['source_abstract']}"
+        enc = tokenizer(ctx, return_tensors="pt", max_length=512, truncation=True)
+        text_ids = enc["input_ids"].to(device)
+        text_mask = enc["attention_mask"].to(device)
+
+        candidates = []
+        with torch.no_grad():
+            # 1 greedy candidate
+            greedy_out = model.generate(
+                audio_features=audio_features,
+                text_input_ids=text_ids,
+                text_attention_mask=text_mask,
+                max_length=max_length,
+                do_sample=False,
+            )
+            candidates.append(tokenizer.decode(greedy_out[0], skip_special_tokens=True))
+
+            # K-1 sampled candidates
+            for _ in range(num_candidates - 1):
+                out = model.generate(
+                    audio_features=audio_features,
+                    text_input_ids=text_ids,
+                    text_attention_mask=text_mask,
+                    max_length=max_length,
+                    do_sample=True,
+                    temperature=temperature,
+                )
+                candidates.append(tokenizer.decode(out[0], skip_special_tokens=True))
+
+        all_candidates.append(candidates)
+        references.append(entry["citation_string"])
+
+    return all_candidates, references
+
+
 def generate_predictions(
     model: MainModel,
     test_entries: list[dict],
@@ -120,6 +185,15 @@ def evaluate_checkpoint(
     metrics = CitationMetrics()
     results = metrics(generated, references)
 
+    # Beam metrics (MRR@5, Recall@5) using 5-candidate sampling
+    print(f"  Computing MRR@5 and Recall@5 (5 candidates per sample)...")
+    candidates_list, _ = generate_candidates(
+        model, test_entries, tokenizer, processor, device,
+        num_candidates=5, temperature=temperature,
+    )
+    beam_metrics = metrics.compute_beam_metrics(candidates_list, references, k=5)
+    results["averages"].update(beam_metrics)
+
     results["predictions"] = [
         {"generated": g, "reference": r}
         for g, r in zip(generated, references)
@@ -177,7 +251,9 @@ def compare_checkpoints(
     print(header)
     print("-" * len(header))
 
-    metric_names = CitationMetrics.METRIC_NAMES
+    metric_names = CitationMetrics.METRIC_NAMES + [
+        f"mrr_at_{k}" for k in [5]
+    ] + [f"recall_at_{k}" for k in [5]]
     for metric in metric_names:
         row = f"{metric:20s}"
         for name in names:
