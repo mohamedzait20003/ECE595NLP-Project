@@ -1,12 +1,23 @@
 import json
 import torch
 import librosa
+import numpy as np
 from tqdm import tqdm
 from pathlib import Path
 from transformers import BartTokenizer, WhisperProcessor
 
 from src.main.model.main_model import MainModel
 from src.main.evaluation.metrics import CitationMetrics
+
+
+def _silent_audio_features(
+    processor: WhisperProcessor, device: torch.device, duration_s: float = 5.0
+) -> torch.Tensor:
+    """Zero audio tensor for text-only baseline (5 seconds of silence at 16kHz)."""
+    silent = np.zeros(int(16000 * duration_s), dtype=np.float32)
+    return processor(
+        silent, sampling_rate=16000, return_tensors="pt"
+    ).input_features.to(device)
 
 
 def load_model(checkpoint_path: str, device: torch.device) -> MainModel:
@@ -40,8 +51,12 @@ def generate_candidates(
     max_length: int = 64,
     num_candidates: int = 5,
     temperature: float = 0.8,
+    text_only: bool = False,
 ) -> tuple[list[list[str]], list[str]]:
     """Generate K candidates per sample using temperature sampling.
+
+    Args:
+        text_only: If True, use silent audio (text-only baseline).
 
     Returns:
         candidates_list: List of K-candidate lists per sample.
@@ -50,16 +65,20 @@ def generate_candidates(
     all_candidates = []
     references = []
 
-    for entry in tqdm(test_entries, desc=f"Generating {num_candidates} candidates"):
-        try:
-            waveform, _ = librosa.load(entry["audio_path"], sr=16000)
-        except Exception as e:
-            print(f"  Skipping {entry['audio_path']}: {e}")
-            continue
+    silent = _silent_audio_features(processor, device) if text_only else None
 
-        audio_features = processor(
-            waveform, sampling_rate=16000, return_tensors="pt"
-        ).input_features.to(device)
+    for entry in tqdm(test_entries, desc=f"Generating {num_candidates} candidates"):
+        if text_only:
+            audio_features = silent
+        else:
+            try:
+                waveform, _ = librosa.load(entry["audio_path"], sr=16000)
+            except Exception as e:
+                print(f"  Skipping {entry['audio_path']}: {e}")
+                continue
+            audio_features = processor(
+                waveform, sampling_rate=16000, return_tensors="pt"
+            ).input_features.to(device)
 
         ctx = f"{entry['source_title']} </s> {entry['source_abstract']}"
         enc = tokenizer(ctx, return_tensors="pt", max_length=512, truncation=True)
@@ -105,21 +124,30 @@ def generate_predictions(
     max_length: int = 64,
     do_sample: bool = False,
     temperature: float = 0.7,
+    text_only: bool = False,
 ) -> tuple[list[str], list[str]]:
-    """Run generation on test entries, return (generated, references)."""
+    """Run generation on test entries, return (generated, references).
+
+    Args:
+        text_only: If True, use silent audio (text-only baseline).
+    """
     generated = []
     references = []
 
-    for entry in tqdm(test_entries, desc="Generating"):
-        try:
-            waveform, _ = librosa.load(entry["audio_path"], sr=16000)
-        except Exception as e:
-            print(f"  Skipping {entry['audio_path']}: {e}")
-            continue
+    silent = _silent_audio_features(processor, device) if text_only else None
 
-        audio_features = processor(
-            waveform, sampling_rate=16000, return_tensors="pt"
-        ).input_features.to(device)
+    for entry in tqdm(test_entries, desc="Generating"):
+        if text_only:
+            audio_features = silent
+        else:
+            try:
+                waveform, _ = librosa.load(entry["audio_path"], sr=16000)
+            except Exception as e:
+                print(f"  Skipping {entry['audio_path']}: {e}")
+                continue
+            audio_features = processor(
+                waveform, sampling_rate=16000, return_tensors="pt"
+            ).input_features.to(device)
 
         ctx = f"{entry['source_title']} </s> {entry['source_abstract']}"
         enc = tokenizer(ctx, return_tensors="pt", max_length=512, truncation=True)
@@ -150,6 +178,7 @@ def evaluate_checkpoint(
     max_samples: int = 0,
     do_sample: bool = False,
     temperature: float = 0.7,
+    text_only: bool = False,
 ) -> dict:
     """Evaluate a single checkpoint on the test set.
 
@@ -177,9 +206,12 @@ def evaluate_checkpoint(
 
     print(f"  Evaluating on {len(test_entries)} test samples...")
 
+    if text_only:
+        print("  Mode: TEXT-ONLY (silent audio — no audio signal)")
+
     generated, references = generate_predictions(
         model, test_entries, tokenizer, processor, device,
-        do_sample=do_sample, temperature=temperature,
+        do_sample=do_sample, temperature=temperature, text_only=text_only,
     )
 
     metrics = CitationMetrics()
@@ -189,7 +221,7 @@ def evaluate_checkpoint(
     print(f"  Computing MRR@5 and Recall@5 (5 candidates per sample)...")
     candidates_list, _ = generate_candidates(
         model, test_entries, tokenizer, processor, device,
-        num_candidates=5, temperature=temperature,
+        num_candidates=5, temperature=temperature, text_only=text_only,
     )
     beam_metrics = metrics.compute_beam_metrics(candidates_list, references, k=5)
     results["averages"].update(beam_metrics)
@@ -210,6 +242,7 @@ def compare_checkpoints(
     do_sample: bool = False,
     temperature: float = 0.7,
     output_path: str = None,
+    text_only_names: set[str] = None,
 ) -> dict[str, dict]:
     """Evaluate and compare multiple checkpoints.
 
@@ -226,14 +259,17 @@ def compare_checkpoints(
         Dict mapping name → evaluation results.
     """
     all_results = {}
+    text_only_names = text_only_names or set()
 
     for name, ckpt_path in checkpoint_paths.items():
         print(f"\n{'='*60}")
         print(f"Evaluating: {name}")
         print(f"{'='*60}")
+        is_text_only = name in text_only_names
         results = evaluate_checkpoint(
             ckpt_path, test_manifest_path, device, max_samples,
             do_sample=do_sample, temperature=temperature,
+            text_only=is_text_only,
         )
         all_results[name] = results
 
