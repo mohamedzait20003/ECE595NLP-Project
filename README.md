@@ -16,7 +16,6 @@ CiteMind is a multimodal model that takes a **spoken academic claim** (audio) an
 | Hallucination Rate | 0.830 | 0.110 | **0.020** |
 | Author Accuracy | 0.005 | 0.075 | **0.085** |
 | Year Accuracy | 0.475 | 0.350 | **0.365** |
-| Recall@5 | 0.000 | 0.010 | **0.010** |
 
 **Key findings:**
 - Audio is essential — format accuracy collapses from 89% → 17% without it
